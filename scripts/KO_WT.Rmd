@@ -1,0 +1,46 @@
+# KO WT
+
+```{r}
+
+quantify_file <- '../raw/2_E18.5_P0_WT_KO_MEP.xlsx'
+excel_table <- readxl::read_excel(quantify_file ,sheet = 1)
+annotation_col_df = data.frame(
+  Type = factor(c(rep(c("WT"), 4),rep(c("KO"), 4),rep(c("WT"), 4),rep(c("KO"), 4)), levels = c('WT', 'KO'))
+  )
+rownames(annotation_col_df) = names(excel_table)[-1]
+ann_color_col = list(Type = c('WT'='#03D9E1' ,'KO'= '#FE9389'))
+
+df_for_lipid_class_heatmap = excel_table[639:dim(excel_table)[1],] %>% 
+  tibble::column_to_rownames('Species')
+heatmap_picture=pheatmap(as.matrix(df_for_lipid_class_heatmap),
+                         color = colorRampPalette(c("navy", "white", "firebrick3"))(50),
+                         annotation_colors = ann_color_col,
+                         treeheight_row=0,
+                         treeheight_col=0,
+                         # border_color='white',
+                         scale='row',
+                         cluster_cols=F,
+                         cluster_rows=F,
+                         angle_col = '90',
+                         annotation_col= annotation_col_df
+                         )
+heatmap_picture
+
+
+df_for_carnitine_heatmap = excel_table %>% 
+  filter(grepl('carnitine',Species))%>% 
+  tibble::column_to_rownames('Species')
+carnitine_heatmap_picture=pheatmap(as.matrix(df_for_carnitine_heatmap),
+                         color = colorRampPalette(c("navy", "white", "firebrick3"))(50),
+                         annotation_colors = ann_color_col,
+                         treeheight_row=0,
+                         treeheight_col=0,
+                         # border_color='white',
+                         scale='row',
+                         cluster_cols=F,
+                         cluster_rows=F,
+                         angle_col = '90',
+                         annotation_col= annotation_col_df
+                         )
+carnitine_heatmap_picture
+```

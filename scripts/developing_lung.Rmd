@@ -1,0 +1,458 @@
+# Developing lung
+
+```{r, include=F}
+
+source('../scripts/functions.R')
+
+knitr::opts_chunk$set(
+    cache=T
+)
+```
+
+```{r load_lung, eval=REGENERATE_RDATA}
+filname = '../raw/1_lung_development_MFP.txt'
+
+d.lung <- cbind(
+    read.table(
+        filname,
+        nrows = 2,
+        header = F,
+        sep = '\t'
+    )[, -1] %>% t %>% as.data.frame %>% `colnames<-`(c('rn', 'group')),
+    read.table(
+        filname,
+        skip = 2,
+        row.names = 1,
+        header = F,
+        sep = '\t'
+    ) %>% t
+) %>% setDT
+
+d.lung[
+    , group := factor(
+        group, 
+        levels = c('E14.5', 'E17.5', 'P0', 'P1', 'P7', 'P21'),
+        ordered = T)
+]
+
+# replace ND by 0
+d.lung[
+    , colnames(d.lung)[3:ncol(d.lung)] := lapply(.SD, function(x) {
+        x[x == 'ND'] <- '0'
+        as.numeric(x)
+    })
+    , .SDcols = 3:ncol(d.lung)
+]
+
+d.lung[
+    , Acylcarnitine := `short-acylcarnitine` + `long-acylcarnitine`
+]
+
+# replace 0 by half of minimum
+minimum <- d.lung[, {
+    SD <- as.matrix(.SD)
+    min(SD[SD != 0], na.rm = T)
+}
+, .SDcols = 3:ncol(d.lung)
+]
+
+## lipid species attributes
+d.lung.attr <- getAttrs(colnames(d.lung))
+
+## group mean
+d.lung.m <- d.lung[
+    , lapply(.SD, function(x) { mean(x) })
+    , by = group
+    , .SDcols = 3:ncol(d.lung)] %>% as.data.frame
+```
+
+### Proportion of species
+
+p
+
+```{r, include=T, fig.width=6, fig.height=4, fig.cap='Number of measured lipid species with various fatty acyl chain length'}
+
+attr2 <- d.lung.attr[3:847, ] %>% subset(
+    name != 'malonyl-CoA'
+)
+
+attr2$class <- factor(
+    attr2$class,
+    levels = c("CE", "Cer", "CL", "Acylcarnitine", "CoA", "DAG", "FFA", "Gb3", "GluCer", "GM3", "LacCer", "LBPA", "LPA", "LPE", "LPG", "LPI", "LPS", "LPC", "PA", "PC", "PE", "PG", "PI", "PS", "S1P", "SL", "SM", "Sph", "TAG"),
+    ordered = T
+)
+
+df0 <- setDT(attr2)[, .N, by = c('class', 'carbon_cat')]
+df1 <- setDT(attr2)[, .N, by = c('class')]
+
+p <- ggplot(df0) + 
+  geom_bar( aes(x = class, y = N, fill = carbon_cat),
+            stat = "identity", color = "grey80") +
+  geom_hline(yintercept = 2^15, color = 'grey80') +
+  layer(geom = 'text', stat = 'identity', position = 'identity',
+        data = df1, mapping = aes(x = class, y = 2^13.5, label = N)) +
+  scale_y_continuous(trans = 'log2', expand = c(0, 2.5, 0.03, 0)) +
+  scale_fill_brewer(palette = 'Reds') +
+  guides(fill = guide_legend(title = 'Fatty acyl\nchain length')) +
+  coord_polar() +
+  theme_bw() +
+  theme(
+    panel.grid = element_blank(),
+    panel.border= element_blank(),
+    axis.text.y = element_blank(),
+    axis.ticks = element_blank(),
+    axis.title = element_blank()
+  )
+
+
+coefficient_ = 0.7
+cairo_pdf('../output/figure1_b_1.pdf',width =4.46  ,
+          height = 5.34)
+set_font(p, family="Arial")
+dev.off()
+
+```
+
+```{r, include=T, fig.width=6, fig.height=4, fig.cap='Number of measured lipid species with various fatty acyl saturation'}
+
+excluded.class <- c('Cer', 'SM', 'GM3', 'GluCer', 'LacCer', 'Gb3', 'Sph', 'SL')
+df0 <- setDT(attr2)[, .N, by = c('class', 'dbond_cat')]
+df1 <- setDT(attr2)[, .N, by = c('class')]
+p <- ggplot(df0) + 
+  geom_bar(aes(x = class, y = N, fill = dbond_cat), stat = "identity", color = "grey80") +
+  geom_hline(yintercept = 2^21, color = 'grey80') +
+  layer(geom = 'text', stat = 'identity', position = 'identity',
+        data = df1, mapping = aes(x = class, y = 2^19.5, label = N)) +
+  scale_y_continuous(trans = 'log2', expand = c(0, 2.5, 0.03, 0)) +
+  scale_fill_brewer(palette = 'Blues') +
+  guides(fill = guide_legend(title = 'Fatty acyl saturation')) +
+  coord_polar() +
+  theme_bw() +
+  theme(
+    panel.grid = element_blank(),
+    panel.border= element_blank(),
+    axis.text.y = element_blank(),
+    axis.ticks = element_blank(),
+    axis.title = element_blank()
+  )
+
+cairo_pdf('../output/figure1_b_2.pdf',width =4.46,
+          height = 5.34)
+set_font(p, family="Arial")
+dev.off()
+
+rm(df0, df1, p)
+```
+
+### Proportional abundance
+
+Carbon chain length
+
+```{r, include=T, fig.height=4, fig.width=8}
+
+d1 <- setDT(d.lung.attr)[
+    d.lung[, 2:847] %>% melt(id.vars = 'group'), on = c(name = 'variable')
+][
+    , list(total = sum(value))
+    , by = list(group, class, carbon_cat, color)
+][
+    !is.na(carbon_cat)
+][
+    , organ := 'Lung'
+]
+
+
+d1[
+    , class := factor(
+        class,
+        levels = c("CE", "Cer",  "CL",  "Acylcarnitine","CoA", "DAG", "FFA", "Gb3", "GluCer", "GM3", "LacCer", "LBPA", "LPA", "LPE", "LPG", "LPI", "LPS", "LPC", "PA", "PC", "PE", "PG", "PI", "PS", "S1P", "SL", "SM", "Sph", "TAG"),
+        ordered = T
+    )
+]
+
+## relative abundance
+group.i = d1[, levels(group)][1]
+p <- ggplot(d1[group == group.i & total > 0]) + 
+    geom_bar( aes(x = class, y = total, fill = carbon_cat),
+              stat = "identity", color = "grey80",
+              position = position_fill()) +
+    scale_fill_brewer(palette = 'Reds') +
+    guides(fill = guide_legend(title = 'Fatty acyl\nchain length')) +
+    coord_polar() +
+    theme_bw() +
+    theme(
+        panel.grid = element_blank(),
+        panel.border= element_blank(),
+        axis.text.y = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title = element_blank(),
+        strip.background = element_blank()
+    )
+
+cairo_pdf('../output/figure1_b_3.pdf', width =4.46,
+          height = 5.34)
+set_font(p, family="Arial")
+dev.off()
+rm(p,  d1)
+```
+
+Unsaturation
+
+```{r, include=T, fig.height=4, fig.width=8}
+
+d1 <- setDT(d.lung.attr)[
+    d.lung[, 2:847] %>% melt(id.vars = 'group'), on = c(name = 'variable')
+][
+    , list(total = sum(value))
+    , by = list(group, class, dbond_cat, color)
+][
+    !is.na(dbond_cat)
+][
+    , organ := 'Lung'
+]
+
+d1[
+    , class := factor(
+        class,
+        levels = c("CE", "Cer",  "CL", "Acylcarnitine", "CoA", "DAG", "FFA", "Gb3", "GluCer", "GM3", "LacCer", "LBPA", "LPA", "LPE", "LPG", "LPI", "LPS", "LPC", "PA", "PC", "PE", "PG", "PI", "PS", "S1P", "SL", "SM", "Sph", "TAG"),
+        ordered = T
+    )
+]
+
+
+## relative abundance
+group.i = d1[, levels(group)][1]
+p <- ggplot(d1[group == group.i & total > 0]) + 
+    geom_bar( aes(x = class, y = total, fill = dbond_cat),
+              stat = "identity", color = "grey80",
+              position = position_fill()) +
+    labs(title = group.i) +
+    scale_fill_brewer(palette = 'Blues') +
+    guides(fill = guide_legend(title = 'Fatty acyl\nchain length')) +
+    coord_polar() +
+    theme_bw() +
+    theme(
+        panel.grid = element_blank(),
+        panel.border= element_blank(),
+        axis.text.y = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title = element_blank(),
+        strip.background = element_blank()
+    )
+cairo_pdf('../output/figure1_b_4.pdf',width =4.46,
+          height = 5.34)
+set_font(p, family="Arial")
+dev.off()
+
+rm(p, d1)
+```
+
+### Intergroup cluster
+
+```{r, include=T, fig.width=8, fig.height=4, fig.cap='(ref:sil1)'}
+com <-  colnames(d.lung.log)[3:847]
+d <- d.lung.log[, com, with = F] %>% as.data.frame
+
+rownames(d) <- 
+    d.lung.log[, list(group = as.character(group))][
+        , paste0(.BY, '-', seq(.N)), by = group][
+            , V1]
+
+
+g <- data.frame(
+    V1 = rownames(d),
+    group = factor(
+          paste0('L-', d.lung.log[, group]),
+        levels = c("H-E10.5", "H-E14.5", "H-E17.5", 
+                   "H-P0", "H-P1", "H-P7", "H-P21", 
+                   "L-E14.5", "L-E17.5", 
+                   "L-P0", "L-P1", "L-P7", "L-P21"),
+        ordered = T
+        ))
+
+hc <- factoextra::eclust(d, FUNcluster = 'hclust',
+                         hc_metric = 'euclidean', hc_method = 'ward.D2')
+
+## plot sillhouette
+factoextra::fviz_silhouette(hc, print.summary = F) + 
+    theme_minimal() + 
+    theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+## plot dendrogram
+p <- factoextra::fviz_dend(hc, rect = TRUE, rect_fill = T, 
+                           color_labels_by_k = F, 
+                           label_cols = g$color[hc$order]) +
+  ylim(ymin = c(-60, 180))
+
+print(p)
+cairo_pdf('../output/figure_1_c.pdf',height = 11)
+p
+dev.off()
+rm(d, g, hc, p, q)
+```
+
+```{r}
+#read file
+group_info = read.csv('../raw/group_info.csv')
+g <-group_info$group %>% factor(., levels = c('E14.5','E17.5','P0' ,'P1', 'P7', 'P21'))
+
+DF_all <- read.csv('../raw/1_lung_development_MFP.txt',sep = '\t') 
+colname_ = DF_all[1,] %>% as.character()
+species_and_class_demaracation_ponit = 845
+
+names(DF_all) = colname_
+DF_all = DF_all[-1,]
+
+DF <- DF_all
+rowname_ = DF[,1]
+DF = DF[,-1]
+rownames(DF) = rowname_
+rowname_ = rownames(DF)
+colname_ = names(DF)
+
+#normlization
+DF <- apply(DF, 2, as.numeric) %>% as.data.frame()
+row.sum <- rowSums(DF)
+rownames(DF) <- rowname_
+DF.norm.all <- sweep(DF, 1, row.sum, '/')
+rownames(DF.norm.all) <- rowname_
+
+#take part of data.
+DF.lipidspecies.norm <- DF.norm.all[c(1:species_and_class_demaracation_ponit),]
+DF.lipidclass.norm <- DF.norm.all[c((species_and_class_demaracation_ponit+1):dim(DF.norm.all)[1]),] %>% 
+  t %>% 
+  as.data.frame %>% 
+  mutate(acylcarnitine = `short-acylcarnitine` + `long-acylcarnitine`) %>% 
+  select(-c(`short-acylcarnitine`, `long-acylcarnitine`))
+
+DF.lipidspecies.norm.mean =DF.lipidspecies.norm %>% 
+  rowwise %>%
+  mutate(E14.5_mean = mean(c_across(contains("E14.5")))) %>%
+  mutate(E17.5_mean = mean(c_across(contains("E17.5")))) %>%
+  mutate(P0_mean = mean(c_across(contains("P0")))) %>%
+  mutate(P1_mean = mean(c_across(contains("P1")))) %>%
+  mutate(P7_mean = mean(c_across(contains("P7")))) %>%
+  mutate(P21_mean = mean(c_across(contains("P21")))) %>%
+  select(E14.5_mean,E17.5_mean,P0_mean,P1_mean,P7_mean,P21_mean) %>% 
+  as.data.frame()
+rownames(DF.lipidspecies.norm.mean) =  rowname_[1:species_and_class_demaracation_ponit]
+
+```
+
+### PCA
+
+```{r}
+
+#PCA
+pca_result <- prcomp(DF.lipidspecies.norm  %>% t,
+                     scale=F  
+)
+
+#plot PCA scree.
+scree_plot = fviz_screeplot(pca_result)
+var1_plot = fviz_cos2(pca_result, choice = "var", axes = 1, top =10)
+var2_plot = fviz_cos2(pca_result, choice = "var", axes = 2, top =10)
+
+layout_pca  <- '
+AA#
+AA#
+BC#
+'
+pdf('../output/pca_scree.pdf',paper = 'a4')
+wrap_plots( list(scree_plot,var1_plot,var2_plot),  design = layout_pca)
+dev.off()
+
+#plot PCA
+PCA_plot = ggbiplot(pca_result,
+                    var.axes=F,
+                    obs.scale = 1,
+                    groups = g, 
+                    ellipse = T,
+                    circle = F)+
+            theme_bw() +
+            theme(panel.border=element_blank(),
+                  panel.grid.major=element_blank(),
+                  panel.grid.minor=element_blank(),
+                  axis.line= element_line(colour = "black"))+
+            theme_parameter
+
+coefficient_ = 0.5
+cairo_pdf('../output/PCA.pdf',width = 8.27 * coefficient_,height = 11.69* coefficient_)  
+PCA_plot
+dev.off()
+```
+
+### Mfuzz
+
+```{r}
+needed_lipid = c('total acylcarnitin', 'FFA', 'SL',    
+                 'acyl-CoA','GM3',
+                 'LPG', 'PG','TAG',
+                 'LPE','GluCer','LPC'
+                 )#select lipid classes for mfuzz analysis 
+DF.lipidspecies.norm.mean_for_mfuzz = DF.lipidspecies.norm.mean %>% 
+  tibble::rownames_to_column('lipid') %>% 
+  filter(grepl(paste('carnitine|FFA|SL|',
+               'CoA|GM3|',
+               'PG|',
+               'LPE|GluCer|LysoPC',sep = ''),lipid)) %>% 
+  tibble::column_to_rownames('lipid')
+protein <- as.matrix(DF.lipidspecies.norm.mean_for_mfuzz)
+mfuzz_class <- new('ExpressionSet',exprs = protein)#build object
+set.seed(123)
+cluster_num <- 4
+mfuzz_cluster <- mfuzz(mfuzz_class, c = cluster_num, m = mestimate(mfuzz_class))
+
+pdf("../output/mfuzz.plot2.pdf",paper = 'a4',width = 6)
+mfuzz.plot2(mfuzz_class, cl = mfuzz_cluster, mfrow = c(3, 2), 
+            centre = T,
+            x11 = F,
+            time.labels = c('E14.5',
+                            'E17.5',
+                            'P0'   ,
+                            'P1'   ,
+                            'P7'   ,
+                            'P21'  )
+            )
+dev.off()
+```
+
+### Heatmap
+
+```{r}
+DF.lipidspecies.norm.mean_for_mfuzz$cluster = mfuzz_cluster$cluster
+DF.forheatmap = DF.lipidspecies.norm.mean_for_mfuzz %>% 
+  arrange(cluster) 
+write.csv(DF.forheatmap,'../output/mfuzz_cluster_result.csv')
+
+heatmap_plot =Heatmap(matrix = DF.forheatmap %>% select(-cluster) %>% as.matrix,
+        name = 'mat',
+        cluster_rows = F,
+        cluster_columns = F,
+        show_row_names = F,
+        column_labels = c("E14.5", "E17.5", "P0","P1","P7","P21"),
+        column_names_gp = gpar(fontsize = 8),
+        heatmap_width = unit(8, "cm"),
+        heatmap_height = unit(16, "cm"),
+        row_split = DF.forheatmap$cluster %>% as.array,
+        show_heatmap_legend = F
+        )
+heatmap_plot =  ggplotify::as.ggplot(heatmap_plot)
+ggsave(heatmap_plot, filename = '../output/heatmap.pdf',width = 210,height = 297, units = 'mm')
+```
+
+### Bar plot
+
+```{r}
+ht.res <- hypothesisTest(DF.lipidclass.norm, g)
+p_list <- batch_barplot(as.data.frame(DF.lipidclass.norm),
+                        g, ht.res, 'TukeyHSD',
+                        add_sig = T,
+                        ggtheme = theme_classic())
+
+coefficient_ = 0.75
+cairo_pdf(file= "../output/Extended data Fig.1.pdf",width = 8.27 , height = 11.69 * (coefficient_- 0.1),onefile = T)
+gridExtra::marrangeGrob(grobs=p_list,nrow=3,ncol=3)
+dev.off()
+
+```
